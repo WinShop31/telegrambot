@@ -31,58 +31,25 @@ MODELS = {
     }
 }
 
-# 🔄 Текущая модель (по умолчанию)
-current_model = "alice"
-
 # 📂 Файл для хранения истории
 HISTORY_FILE = "historys.txt"
 
 logging.basicConfig(level=logging.INFO)
 
-
-# 🧠 Функции работы с памятью
-def load_history():
-    """Загружает историю из файла в словарь"""
-    if not os.path.exists(HISTORY_FILE):
-        return {}
-    histories = {}
-    with open(HISTORY_FILE, "r", encoding="utf-8") as f:
-        for line in f:
-            if " - " in line:
-                chat_id, msgs = line.strip().split(" - ", 1)
-                parts = msgs.split("|")
-                history = []
-                for p in parts:
-                    p = p.strip()
-                    if p.startswith("user:"):
-                        history.append({"role": "user", "content": p.replace("user:", "").strip()})
-                    elif p.startswith("assistant:"):
-                        history.append({"role": "assistant", "content": p.replace("assistant:", "").strip()})
-                histories[int(chat_id)] = history
-    return histories
-
-
-def save_history(histories):
-    """Сохраняет историю в файл"""
-    with open(HISTORY_FILE, "w", encoding="utf-8") as f:
-        for chat_id, msgs in histories.items():
-            msg_texts = " | ".join([f"{m['role']}: {m['content']}" for m in msgs])
-            f.write(f"{chat_id} - {msg_texts}\n")
-
-
-# 🧠 Загружаем историю при старте
-user_histories = load_history()
+# 🧠 Память: истории и модели для каждого пользователя
+user_histories = {}
+user_models = {}  # <--- теперь у каждого свой выбор модели
 
 
 # 🚀 Команда /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "👋 Привет!\n\n"
-        "Теперь я сохраняю в `historys.txt` и твои сообщения, и свои ответы.\n\n"
+        "Теперь у каждого пользователя своя персональная модель и история.\n\n"
         "⚙️ Управление:\n"
         "• /model — сменить модель\n"
         "• /models — категории моделей\n"
-        "• /current — активная модель\n"
+        "• /current — твоя активная модель\n"
         "• /clear — очистить историю"
     )
 
@@ -107,13 +74,14 @@ async def set_model(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # 🔄 Обработка inline‑кнопок
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global current_model
     query = update.callback_query
     await query.answer()
 
     choice = query.data
+    chat_id = update.effective_chat.id
+
     if choice in MODELS:
-        current_model = choice
+        user_models[chat_id] = choice  # сохраняем персональную модель
         label = MODELS[choice]["label"]
         category = MODELS[choice]["category"]
         await query.edit_message_text(
@@ -137,26 +105,27 @@ async def list_models(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # 🔎 Команда /current
 async def current(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    label = MODELS[current_model]["label"]
-    category = MODELS[current_model]["category"]
+    chat_id = update.effective_chat.id
+    model_key = user_models.get(chat_id, "alice")  # по умолчанию Alice
+    label = MODELS[model_key]["label"]
+    category = MODELS[model_key]["category"]
     await update.message.reply_text(
-        f"🔄 Текущая модель: *{label}*\nКатегория: {category}",
+        f"🔄 Твоя текущая модель: *{label}*\nКатегория: {category}",
         parse_mode="Markdown"
     )
 
 
-# 🧹 Команда /clear — очистка истории пользователя
+# 🧹 Команда /clear
 async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     if chat_id in user_histories:
         user_histories[chat_id] = []
-        save_history(user_histories)
         await update.message.reply_text("🧹 История очищена!")
     else:
         await update.message.reply_text("ℹ️ У тебя пока нет сохранённой истории.")
 
 
-# 💬 Основной чат с памятью
+# 💬 Основной чат
 async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global user_histories
     user_text = update.message.text
@@ -165,9 +134,11 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_text.startswith("/"):
         return
 
-    # Инициализация истории для пользователя
+    # Инициализация истории и модели
     if chat_id not in user_histories:
         user_histories[chat_id] = []
+    if chat_id not in user_models:
+        user_models[chat_id] = "alice"  # по умолчанию
 
     # Добавляем сообщение пользователя
     user_histories[chat_id].append({"role": "user", "content": user_text})
@@ -180,7 +151,7 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Authorization": f"Bearer {API_KEY}"
     }
     data = {
-        "model": MODELS[current_model]["id"],
+        "model": MODELS[user_models[chat_id]]["id"],  # персональная модель
         "messages": user_histories[chat_id]
     }
 
@@ -192,9 +163,6 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Добавляем ответ бота
         user_histories[chat_id].append({"role": "assistant", "content": bot_reply})
         user_histories[chat_id] = user_histories[chat_id][-10:]
-
-        # Сохраняем историю в файл
-        save_history(user_histories)
 
         formatted_reply = bot_reply.replace("**", "*")
     except Exception as e:
