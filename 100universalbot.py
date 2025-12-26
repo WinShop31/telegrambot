@@ -60,6 +60,7 @@ L = {
         "add_exists": "Такой текст уже существует.",
         "add_limit": "Ты достиг лимита текстов.",
         "add_ok": "Твой текст сохранён!\n🆔 ID: <b>{id}</b>",
+        "add_only_photo": "Можно прикреплять только фото.",
 
         "my_none": "У тебя нет добавленных текстов.",
         "my_title": "📚 <b>Твои тексты:</b>",
@@ -77,7 +78,7 @@ L = {
         "help": (
             "{mention}, вот что я умею:\n\n"
             "🔥 <b>/100</b> — выдать случайный пользовательский текст с твоим тегом.\n"
-            "📝 <b>/addtext &lt;текст&gt;</b> — добавить свой текст.\n"
+            "📝 <b>/addtext &lt;текст&gt;</b> — добавить свой текст (можно с фото).\n"
             "📚 <b>/mytexts</b> — показать твои тексты.\n"
             "🗑 <b>/deltext &lt;id&gt;</b> — удалить свой текст.\n"
             "🌐 <b>/100settings</b> — выбрать язык.\n"
@@ -86,6 +87,7 @@ L = {
             "⚠️ Лимиты:\n"
             f"• максимум <b>{USER_LIMIT}</b> текстов\n"
             "• нельзя добавлять одинаковые строки\n"
+            "• можно прикреплять только фото\n"
             "• бот работает только в группах\n"
         ),
 
@@ -98,6 +100,7 @@ L = {
         "add_exists": "This text already exists.",
         "add_limit": "You reached your text limit.",
         "add_ok": "Your text has been saved!\n🆔 ID: <b>{id}</b>",
+        "add_only_photo": "Only photos are allowed.",
 
         "my_none": "You have no added texts.",
         "my_title": "📚 <b>Your texts:</b>",
@@ -115,7 +118,7 @@ L = {
         "help": (
             "{mention}, here is what I can do:\n\n"
             "🔥 <b>/100</b> — send a random user text with your mention.\n"
-            "📝 <b>/addtext &lt;text&gt;</b> — add your own text.\n"
+            "📝 <b>/addtext &lt;text&gt;</b> — add your own text (photo allowed).\n"
             "📚 <b>/mytexts</b> — show your texts.\n"
             "🗑 <b>/deltext &lt;id&gt;</b> — delete your text.\n"
             "🌐 <b>/100settings</b> — choose language.\n"
@@ -124,6 +127,7 @@ L = {
             "⚠️ Limits:\n"
             f"• max <b>{USER_LIMIT}</b> texts\n"
             "• no duplicates\n"
+            "• only photos allowed\n"
             "• bot works only in groups\n"
         ),
 
@@ -153,10 +157,22 @@ async def add_text(msg: types.Message):
     if len(text) > 300:
         return await msg.reply(T["add_long"])
 
+    # Проверяем медиа
+    photo_id = None
+
+    if msg.photo:
+        photo_id = msg.photo[-1].file_id
+    elif msg.media_group_id:
+        return await msg.reply(T["add_only_photo"])
+    elif msg.document or msg.video or msg.animation:
+        return await msg.reply(T["add_only_photo"])
+
+    # антиспам
     for t in data["texts"]:
         if t["text"].lower() == text.lower():
             return await msg.reply(T["add_exists"])
 
+    # лимит
     user_texts = [t for t in data["texts"] if t["author_id"] == msg.from_user.id]
     if len(user_texts) >= USER_LIMIT:
         return await msg.reply(T["add_limit"])
@@ -167,7 +183,8 @@ async def add_text(msg: types.Message):
         "id": new_id,
         "author_id": msg.from_user.id,
         "author_name": msg.from_user.username or msg.from_user.full_name,
-        "text": text
+        "text": text,
+        "photo": photo_id
     })
 
     save_data(data)
@@ -188,11 +205,13 @@ async def my_texts(msg: types.Message):
     if not user_texts:
         return await msg.reply(T["my_none"])
 
-    out = T["my_title"] + "\n\n"
     for t in user_texts:
-        out += f"🆔 <b>{t['id']}</b>: {t['text']}\n"
+        caption = f"🆔 <b>{t['id']}</b>: {t['text']}"
 
-    await msg.reply(out)
+        if t.get("photo"):
+            await msg.reply_photo(photo=t["photo"], caption=caption)
+        else:
+            await msg.reply(caption)
 
 
 # ---------------------- /deltext ----------------------
@@ -242,15 +261,18 @@ async def hundred(msg: types.Message):
     chosen = random.choice(data["texts"])
 
     mention = f'<a href="tg://user?id={msg.from_user.id}">{msg.from_user.full_name}</a>'
+    final_text = chosen["text"].replace("{mention}", mention)
 
-    final_text = (
-        f"{chosen['text'].replace('{mention}', mention)}\n\n"
-        f"👤 <i>Added by:</i> <b>{chosen['author_name']}</b>" if lang == "en"
-        else f"{chosen['text'].replace('{mention}', mention)}\n\n"
-             f"👤 <i>Добавил:</i> <b>{chosen['author_name']}</b>"
+    caption = (
+        f"{final_text}\n\n👤 <i>Added by:</i> <b>{chosen['author_name']}</b>"
+        if lang == "en"
+        else f"{final_text}\n\n👤 <i>Добавил:</i> <b>{chosen['author_name']}</b>"
     )
 
-    await msg.reply(final_text, reply_to_message_id=msg.message_id)
+    if chosen.get("photo"):
+        await msg.reply_photo(photo=chosen["photo"], caption=caption, reply_to_message_id=msg.message_id)
+    else:
+        await msg.reply(caption, reply_to_message_id=msg.message_id)
 
 
 # ---------------------- /100settings ----------------------
@@ -262,8 +284,8 @@ async def settings_cmd(msg: types.Message):
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="🇷🇺 Русский", callback_data=f"setlang_ru"),
-            InlineKeyboardButton(text="🇬🇧 English", callback_data=f"setlang_en")
+            InlineKeyboardButton(text="🇷🇺 Русский", callback_data="setlang_ru"),
+            InlineKeyboardButton(text="🇬🇧 English", callback_data="setlang_en")
         ]
     ])
 
