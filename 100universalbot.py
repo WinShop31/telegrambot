@@ -20,13 +20,14 @@ dp = Dispatcher()
 DATA_FILE = "texts.json"
 USER_LIMIT = 20
 DEFAULT_LANG = "ru"
+ADMIN_ID = 1345626274
 
 
 # ---------------------- ФАЙЛОВЫЕ ОПЕРАЦИИ ----------------------
 
 def load_data():
     if not os.path.exists(DATA_FILE):
-        save_data({"texts": [], "settings": {}})
+        save_data({"texts": [], "settings": {}, "vip": []})
     with open(DATA_FILE, "r", encoding="utf-8") as f:
         return json.load(f)
 
@@ -34,6 +35,29 @@ def load_data():
 def save_data(data):
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=4, ensure_ascii=False)
+
+
+# ---------------------- VIP ----------------------
+
+def is_vip(user_id):
+    data = load_data()
+    return user_id in data.get("vip", [])
+
+
+def add_vip(user_id):
+    data = load_data()
+    if "vip" not in data:
+        data["vip"] = []
+    if user_id not in data["vip"]:
+        data["vip"].append(user_id)
+    save_data(data)
+
+
+def remove_vip(user_id):
+    data = load_data()
+    if "vip" in data and user_id in data["vip"]:
+        data["vip"].remove(user_id)
+    save_data(data)
 
 
 # ---------------------- ЛОКАЛИЗАЦИЯ ----------------------
@@ -51,8 +75,6 @@ def set_chat_lang(chat_id, lang):
     save_data(data)
 
 
-# ---------------------- ТЕКСТЫ ЛОКАЛИЗАЦИИ ----------------------
-
 L = {
     "ru": {
         "add_short": "Текст слишком короткий.",
@@ -61,6 +83,7 @@ L = {
         "add_limit": "Ты достиг лимита текстов.",
         "add_ok": "Твой текст сохранён!\n🆔 ID: <b>{id}</b>",
         "add_only_photo": "Можно прикреплять только фото.",
+        "add_not_vip": "⛔ Ты не VIP, куда ты лезешь с фотками?",
 
         "my_none": "У тебя нет добавленных текстов.",
         "my_title": "📚 <b>Твои тексты:</b>",
@@ -78,7 +101,7 @@ L = {
         "help": (
             "{mention}, вот что я умею:\n\n"
             "🔥 <b>/100</b> — выдать случайный пользовательский текст с твоим тегом.\n"
-            "📝 <b>/addtext &lt;текст&gt;</b> — добавить свой текст (можно с фото).\n"
+            "📝 <b>/addtext &lt;текст&gt;</b> — добавить свой текст (фото только для VIP).\n"
             "📚 <b>/mytexts</b> — показать твои тексты.\n"
             "🗑 <b>/deltext &lt;id&gt;</b> — удалить свой текст.\n"
             "🌐 <b>/100settings</b> — выбрать язык.\n"
@@ -87,7 +110,7 @@ L = {
             "⚠️ Лимиты:\n"
             f"• максимум <b>{USER_LIMIT}</b> текстов\n"
             "• нельзя добавлять одинаковые строки\n"
-            "• можно прикреплять только фото\n"
+            "• фото могут добавлять только VIP\n"
             "• бот работает только в группах\n"
         ),
 
@@ -101,6 +124,7 @@ L = {
         "add_limit": "You reached your text limit.",
         "add_ok": "Your text has been saved!\n🆔 ID: <b>{id}</b>",
         "add_only_photo": "Only photos are allowed.",
+        "add_not_vip": "⛔ You're not VIP, don't even try adding photos.",
 
         "my_none": "You have no added texts.",
         "my_title": "📚 <b>Your texts:</b>",
@@ -118,7 +142,7 @@ L = {
         "help": (
             "{mention}, here is what I can do:\n\n"
             "🔥 <b>/100</b> — send a random user text with your mention.\n"
-            "📝 <b>/addtext &lt;text&gt;</b> — add your own text (photo allowed).\n"
+            "📝 <b>/addtext &lt;text&gt;</b> — add your own text (photos only for VIP).\n"
             "📚 <b>/mytexts</b> — show your texts.\n"
             "🗑 <b>/deltext &lt;id&gt;</b> — delete your text.\n"
             "🌐 <b>/100settings</b> — choose language.\n"
@@ -127,13 +151,51 @@ L = {
             "⚠️ Limits:\n"
             f"• max <b>{USER_LIMIT}</b> texts\n"
             "• no duplicates\n"
-            "• only photos allowed\n"
+            "• photos only for VIP\n"
             "• bot works only in groups\n"
         ),
 
         "private": "nope, this bot works only in groups"
     }
 }
+
+
+# ---------------------- VIP КОМАНДЫ ----------------------
+
+@dp.message(F.text.startswith("/vip"))
+async def vip_add(msg: types.Message):
+    if msg.from_user.id != ADMIN_ID:
+        return await msg.reply("⛔ Только админ может выдавать VIP.")
+
+    parts = msg.text.split(" ", 1)
+    if len(parts) < 2:
+        return await msg.reply("Использование: /vip <user_id>")
+
+    try:
+        uid = int(parts[1])
+    except:
+        return await msg.reply("ID должен быть числом.")
+
+    add_vip(uid)
+    await msg.reply(f"✨ Пользователь {uid} теперь VIP.")
+
+
+@dp.message(F.text.startswith("/unvip"))
+async def vip_remove(msg: types.Message):
+    if msg.from_user.id != ADMIN_ID:
+        return await msg.reply("⛔ Только админ может снимать VIP.")
+
+    parts = msg.text.split(" ", 1)
+    if len(parts) < 2:
+        return await msg.reply("Использование: /unvip <user_id>")
+
+    try:
+        uid = int(parts[1])
+    except:
+        return await msg.reply("ID должен быть числом.")
+
+    remove_vip(uid)
+    await msg.reply(f"❌ Пользователь {uid} больше не VIP.")
 
 
 # ---------------------- /addtext ----------------------
@@ -163,7 +225,10 @@ async def add_text(msg: types.Message):
     photo_id = None
 
     if msg.photo:
+        if not is_vip(msg.from_user.id):
+            return await msg.reply(T["add_not_vip"])
         photo_id = msg.photo[-1].file_id
+
     elif msg.document or msg.video or msg.animation:
         return await msg.reply(T["add_only_photo"])
 
