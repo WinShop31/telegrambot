@@ -138,14 +138,16 @@ L = {
 
 # ---------------------- /addtext ----------------------
 
-@dp.message(F.text.startswith("/addtext"))
+@dp.message(F.text.startswith("/addtext") | F.caption.startswith("/addtext"))
 async def add_text(msg: types.Message):
     lang = get_chat_lang(msg.chat.id)
     T = L[lang]
 
     data = load_data()
 
-    parts = msg.text.split(" ", 1)
+    raw = msg.text or msg.caption
+    parts = raw.split(" ", 1)
+
     if len(parts) < 2:
         return await msg.reply("Usage: /addtext <text>")
 
@@ -162,8 +164,6 @@ async def add_text(msg: types.Message):
 
     if msg.photo:
         photo_id = msg.photo[-1].file_id
-    elif msg.media_group_id:
-        return await msg.reply(T["add_only_photo"])
     elif msg.document or msg.video or msg.animation:
         return await msg.reply(T["add_only_photo"])
 
